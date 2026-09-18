@@ -1,0 +1,9 @@
+{
+  "remote.SSH.defaultForwardedPorts": [
+    {
+      "name": "lab-status dashboard",
+      "localPort": 8799,
+      "remotePort": 8799
+    }
+  ]
+}
