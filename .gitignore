@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+
+# Real alert config (recipient address, and SMTP credentials if
+# using an external relay) -- never commit this. See
+# webapp/alerts.env.example for the template.
+webapp/alerts.env

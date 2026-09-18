@@ -13,19 +13,23 @@ that without thinking about who else is on the network.
 from __future__ import annotations
 
 import argparse
+import email.message
 import http.server
 import json
 import os
 import shutil
+import smtplib
+import socket
 import subprocess
+import threading
 import time
 from pathlib import Path
 
 STATIC_DIR = Path(__file__).parent / "static"
 
-# Single source of truth for "is this bad" -- computed once here so
-# the dashboard's meters and its flags list can't disagree about
-# what counts as critical.
+# Single source of truth for "is this bad" -- both the dashboard's
+# flags and the email alerter read these, so a red meter and a
+# missing/present email never disagree about what counts as critical.
 THRESHOLDS = {
     "disk_warn_pct": 85,
     "disk_crit_pct": 90,
@@ -200,9 +204,8 @@ def get_gpu() -> list[dict] | None:
 
 def build_flags(disks: list[dict], system: dict) -> list[dict]:
     """The same "is this bad" judgment the dashboard shows, in one
-    place, so anything that later reads flags (email alerts, etc.)
-    fires on exactly what the UI is showing red -- never a metric
-    the UI considers fine."""
+    place, so the email alerter fires on exactly what the dashboard
+    is showing red -- never a metric the UI considers fine."""
     flags = []
     for d in disks:
         if d["severity"] != "ok":
@@ -260,6 +263,76 @@ def build_status() -> dict:
     }
 
 
+def send_email(subject: str, body: str) -> None:
+    to_addr = os.environ.get("ALERT_EMAIL_TO", "").strip()
+    if not to_addr:
+        return  # alerting is opt-in; no recipient means do nothing
+
+    msg = email.message.EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = os.environ.get(
+        "ALERT_EMAIL_FROM", f"lab-status@{socket.gethostname()}"
+    )
+    msg["To"] = to_addr
+    msg.set_content(body)
+
+    host = os.environ.get("SMTP_HOST", "localhost")
+    port = int(os.environ.get("SMTP_PORT", "25"))
+    user = os.environ.get("SMTP_USER", "")
+    password = os.environ.get("SMTP_PASSWORD", "")
+    use_tls = os.environ.get("SMTP_USE_TLS", "false").lower() == "true"
+
+    with smtplib.SMTP(host, port, timeout=10) as smtp:
+        if use_tls:
+            smtp.starttls()
+        if user:
+            smtp.login(user, password)
+        smtp.send_message(msg)
+
+
+# Tracks, per flag id, when we last emailed about it -- so a
+# still-critical disk re-alerts on a cooldown instead of every check,
+# and clears once the flag disappears so a fresh alert fires promptly
+# if it comes back.
+_alert_last_sent: dict[str, float] = {}
+
+
+def check_alerts() -> None:
+    cooldown = int(os.environ.get("ALERT_COOLDOWN_MINUTES", "60")) * 60
+    status = build_status()
+    critical = {f["id"]: f for f in status["flags"] if f["level"] == "critical"}
+    now = time.time()
+
+    for fid, flag in critical.items():
+        last = _alert_last_sent.get(fid)
+        if last is None or (now - last) >= cooldown:
+            send_email(
+                f"[lab-status] CRITICAL on {status['hostname']}: {flag['message']}",
+                f"{flag['message']}\n\nHost: {status['hostname']}\n"
+                "This will re-alert every "
+                f"{cooldown // 60} minutes while it stays critical.",
+            )
+            _alert_last_sent[fid] = now
+
+    for fid in list(_alert_last_sent):
+        if fid not in critical:
+            send_email(
+                f"[lab-status] RECOVERED on {status['hostname']}: {fid}",
+                f"{fid} on {status['hostname']} is no longer critical.",
+            )
+            del _alert_last_sent[fid]
+
+
+def alert_loop() -> None:
+    interval = int(os.environ.get("ALERT_CHECK_INTERVAL_SECONDS", "60"))
+    while True:
+        try:
+            check_alerts()
+        except Exception as e:
+            print(f"lab-status: alert check failed: {e}")
+        time.sleep(interval)
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass  # keep the terminal quiet; use journalctl for logs under systemd
@@ -292,8 +365,24 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="127.0.0.1", help="bind address")
     parser.add_argument("--port", type=int, default=8799)
+    parser.add_argument(
+        "--test-alert",
+        action="store_true",
+        help="send one test email using the current ALERT_* env vars, then exit",
+    )
     args = parser.parse_args()
 
+    if args.test_alert:
+        if not os.environ.get("ALERT_EMAIL_TO", "").strip():
+            raise SystemExit("ALERT_EMAIL_TO is not set -- nothing to send to.")
+        send_email(
+            f"[lab-status] test alert from {socket.gethostname()}",
+            "If you're reading this, email alerting is configured correctly.",
+        )
+        print(f"Test email sent to {os.environ['ALERT_EMAIL_TO']}")
+        return
+
+    threading.Thread(target=alert_loop, daemon=True).start()
     server = http.server.ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"lab-status dashboard on http://{args.host}:{args.port}/")
     server.serve_forever()

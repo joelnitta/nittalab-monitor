@@ -3,6 +3,9 @@ Description=nittalab-monitor status dashboard
 After=network.target
 
 [Service]
+# The leading "-" makes a missing file non-fatal: alerting is
+# opt-in, so the dashboard must still start before it's configured.
+EnvironmentFile=-%h/nittalab-monitor/webapp/alerts.env
 ExecStart=/usr/bin/python3 %h/nittalab-monitor/webapp/status_server.py --host 127.0.0.1 --port 8799
 Restart=on-failure
 RestartSec=5
