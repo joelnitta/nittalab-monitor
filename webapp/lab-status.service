@@ -1,0 +1,11 @@
+[Unit]
+Description=nittalab-monitor status dashboard
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 %h/nittalab-monitor/webapp/status_server.py --host 127.0.0.1 --port 8799
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -20,6 +20,11 @@ jobs (phylogenetics, sequence alignment, R/targets pipelines, etc).
 The goal of this skill is a fast, honest snapshot of machine health
 -- not a full monitoring dashboard.
 
+There is also a live, auto-refreshing browser dashboard covering the
+same data -- see `../../../webapp/README.md`. Point the user at it
+if they want to watch the machine continuously rather than get a
+one-off report.
+
 ## Step 1: run the collector
 
 ```

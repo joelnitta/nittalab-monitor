@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lab server status</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page:        #f9f9f7;
+    --surface:     #fcfcfb;
+    --text:        #0b0b0b;
+    --text-2:      #52514e;
+    --muted:       #898781;
+    --gridline:    #e1e0d9;
+    --border:      rgba(11,11,11,0.10);
+    --accent:      #2a78d6;
+    --good:        #0ca30c;
+    --warning:     #fab219;
+    --critical:    #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page:        #0d0d0d;
+      --surface:     #1a1a19;
+      --text:        #ffffff;
+      --text-2:      #c3c2b7;
+      --muted:       #898781;
+      --gridline:    #2c2c2a;
+      --border:      rgba(255,255,255,0.10);
+      --accent:      #3987e5;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 14px;
+    line-height: 1.4;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 20px 16px 48px; }
+
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  header h1 { font-size: 18px; margin: 0; }
+  #meta { color: var(--muted); font-size: 12.5px; }
+
+  section { margin-bottom: 24px; }
+  h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    margin: 0 0 10px;
+    font-weight: 600;
+  }
+
+  #flags { display: flex; flex-direction: column; gap: 6px; }
+  .flag {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .flag .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .flag.ok .dot { background: var(--good); }
+  .flag.warning .dot { background: var(--warning); }
+  .flag.critical .dot { background: var(--critical); }
+
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+  }
+  .tile {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .tile .label { color: var(--muted); font-size: 11.5px; }
+  .tile .value { font-size: 22px; font-weight: 600; margin-top: 2px; }
+  .tile .sub { color: var(--text-2); font-size: 12px; margin-top: 2px; }
+
+  .meter-row { margin-bottom: 12px; }
+  .meter-row .top {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12.5px;
+    margin-bottom: 4px;
+    color: var(--text-2);
+  }
+  .meter-row .top .name { color: var(--text); font-weight: 500; }
+  .track {
+    height: 8px;
+    border-radius: 4px;
+    background: var(--gridline);
+    overflow: hidden;
+  }
+  .fill { height: 100%; border-radius: 4px; }
+  .fill.ok { background: var(--accent); }
+  .fill.warning { background: var(--warning); }
+  .fill.critical { background: var(--critical); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td {
+    text-align: left;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--gridline);
+    white-space: nowrap;
+  }
+  th {
+    color: var(--muted);
+    font-weight: 500;
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.cmd {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 1px; /* forces the column to shrink; width set by table layout */
+    width: 100%;
+    color: var(--text-2);
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    font-size: 12px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 4px 4px;
+    overflow-x: auto;
+  }
+  .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+  .tab {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-2);
+    border-radius: 999px;
+    padding: 5px 12px;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+  .tab.active { color: var(--text); border-color: var(--accent); }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  @media (min-width: 720px) {
+    .grid-2 { grid-template-columns: 1.1fr 1fr; }
+  }
+
+  #empty-gpu, .placeholder { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1 id="hostname">Lab server status</h1>
+    <span id="meta">connecting…</span>
+  </header>
+
+  <section>
+    <h2>Flags</h2>
+    <div id="flags"></div>
+  </section>
+
+  <section>
+    <h2>Load &amp; memory</h2>
+    <div class="tiles" id="tiles"></div>
+  </section>
+
+  <div class="grid-2">
+    <section>
+      <h2>Disk usage</h2>
+      <div class="card" id="disks" style="padding:12px;"></div>
+    </section>
+
+    <section>
+      <h2>By user (aggregated across processes)</h2>
+      <div class="card">
+        <table id="users-table">
+          <thead>
+            <tr><th>User</th><th class="num">Procs</th><th class="num">CPU %</th><th class="num">Mem %</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <section id="gpu-section" style="display:none;">
+    <h2>GPU</h2>
+    <div class="card" id="gpu" style="padding:12px;"></div>
+  </section>
+
+  <section>
+    <h2>Top processes</h2>
+    <div class="tabs">
+      <button class="tab active" data-key="top_cpu">By CPU</button>
+      <button class="tab" data-key="top_mem">By memory</button>
+    </div>
+    <div class="card">
+      <table id="proc-table">
+        <thead>
+          <tr>
+            <th>User</th><th>PID</th><th class="num">CPU %</th><th class="num">Mem %</th>
+            <th>Elapsed</th><th>Command</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<script>
+const POLL_MS = 5000;
+let latest = null;
+let procKey = "top_cpu";
+
+function fmtBytes(n) {
+  const units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
+  let i = 0, v = n;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+function severity(pct, warnAt, critAt) {
+  if (pct >= critAt) return "critical";
+  if (pct >= warnAt) return "warning";
+  return "ok";
+}
+
+function flagRow(level, text) {
+  return `<div class="flag ${level}"><span class="dot"></span>${text}</div>`;
+}
+
+function render(data) {
+  latest = data;
+  document.getElementById("hostname").textContent = data.hostname || "Lab server status";
+  const age = ((Date.now() / 1000) - data.generated_at).toFixed(0);
+  document.getElementById("meta").textContent = `updated ${age}s ago`;
+
+  // --- flags ---
+  const flags = [];
+  for (const d of data.disks) {
+    const s = severity(d.use_pct, 85, 90);
+    if (s !== "ok") {
+      flags.push(flagRow(s, `<strong>${d.mount}</strong> is at ${d.use_pct}% used (${fmtBytes(d.avail_bytes)} free)`));
+    }
+  }
+  const sys = data.system;
+  const loadRatio = sys.load1 / Math.max(sys.ncpu, 1);
+  const loadSev = severity(loadRatio, 1.3, 2.0); // 1.3x cores -> warn, 2.0x -> critical
+  if (loadSev !== "ok") {
+    flags.push(flagRow(loadSev, `Load average ${sys.load1.toFixed(1)} is ${loadRatio.toFixed(1)}&times; the ${sys.ncpu} cores`));
+  }
+  const mem = sys.memory || {};
+  if (mem.swap_total) {
+    const swapPct = 100 * mem.swap_used / mem.swap_total;
+    const swapSev = severity(swapPct, 50, 85);
+    if (swapSev !== "ok") {
+      flags.push(flagRow(swapSev, `Swap is ${swapPct.toFixed(0)}% used`));
+    }
+  }
+  document.getElementById("flags").innerHTML =
+    flags.length ? flags.join("") : flagRow("ok", "Nothing flagged right now");
+
+  // --- stat tiles ---
+  const memPct = mem.total ? (100 * mem.used / mem.total) : 0;
+  const tiles = [
+    { label: "Load average (1m / 5m / 15m)", value: sys.load1.toFixed(1),
+      sub: `${sys.load5.toFixed(1)} / ${sys.load15.toFixed(1)} · ${sys.ncpu} cores` },
+    { label: "Memory used", value: `${memPct.toFixed(0)}%`,
+      sub: mem.total ? `${fmtBytes(mem.used)} / ${fmtBytes(mem.total)}` : "n/a" },
+    { label: "Memory available", value: mem.available ? fmtBytes(mem.available) : "n/a", sub: "" },
+    { label: "Swap used", value: mem.swap_total ? `${(100 * mem.swap_used / mem.swap_total).toFixed(0)}%` : "n/a",
+      sub: mem.swap_total ? `${fmtBytes(mem.swap_used)} / ${fmtBytes(mem.swap_total)}` : "" },
+  ];
+  document.getElementById("tiles").innerHTML = tiles.map(t => `
+    <div class="tile">
+      <div class="label">${t.label}</div>
+      <div class="value">${t.value}</div>
+      ${t.sub ? `<div class="sub">${t.sub}</div>` : ""}
+    </div>`).join("");
+
+  // --- disks ---
+  document.getElementById("disks").innerHTML = data.disks.map(d => {
+    const sev = severity(d.use_pct, 85, 90);
+    return `
+      <div class="meter-row">
+        <div class="top">
+          <span class="name">${d.mount}</span>
+          <span>${fmtBytes(d.used_bytes)} / ${fmtBytes(d.size_bytes)} (${d.use_pct}%)</span>
+        </div>
+        <div class="track"><div class="fill ${sev}" style="width:${Math.min(d.use_pct,100)}%"></div></div>
+      </div>`;
+  }).join("") || `<div class="placeholder">No filesystems reported.</div>`;
+
+  // --- users ---
+  const usersBody = data.users
+    .filter(u => u.procs > 0)
+    .map(u => `<tr><td>${u.user}</td><td class="num">${u.procs}</td><td class="num">${u.cpu.toFixed(1)}</td><td class="num">${u.mem.toFixed(1)}</td></tr>`)
+    .join("");
+  document.querySelector("#users-table tbody").innerHTML = usersBody;
+
+  // --- gpu ---
+  const gpuSection = document.getElementById("gpu-section");
+  if (data.gpus && data.gpus.length) {
+    gpuSection.style.display = "";
+    document.getElementById("gpu").innerHTML = data.gpus.map(g => `
+      <div class="meter-row">
+        <div class="top">
+          <span class="name">GPU ${g.index} — ${g.name}</span>
+          <span>${g.util_pct}% util · ${fmtBytes(g.mem_used_mib * 1024 * 1024)} / ${fmtBytes(g.mem_total_mib * 1024 * 1024)} · ${g.temp_c}&deg;C</span>
+        </div>
+        <div class="track"><div class="fill ${severity(g.util_pct, 80, 95)}" style="width:${g.util_pct}%"></div></div>
+      </div>`).join("");
+  } else {
+    gpuSection.style.display = "none";
+  }
+
+  renderProcTable();
+}
+
+function renderProcTable() {
+  if (!latest) return;
+  const rows = latest[procKey] || [];
+  document.querySelector("#proc-table tbody").innerHTML = rows.map(p => `
+    <tr>
+      <td>${p.user}</td>
+      <td>${p.pid}</td>
+      <td class="num">${p.cpu.toFixed(1)}</td>
+      <td class="num">${p.mem.toFixed(1)}</td>
+      <td>${p.etime}</td>
+      <td class="cmd" title="${p.cmd.replace(/"/g, '&quot;')}">${p.cmd}</td>
+    </tr>`).join("");
+}
+
+document.querySelectorAll(".tab").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    procKey = btn.dataset.key;
+    renderProcTable();
+  });
+});
+
+async function poll() {
+  try {
+    const res = await fetch("/api/status", { cache: "no-store" });
+    render(await res.json());
+  } catch (e) {
+    document.getElementById("meta").textContent = "connection lost — retrying…";
+  }
+}
+
+poll();
+setInterval(poll, POLL_MS);
+setInterval(() => { if (latest) render(latest); }, 1000);
+</script>
+</body>
+</html>
