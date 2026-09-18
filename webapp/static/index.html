@@ -262,29 +262,14 @@ function render(data) {
   document.getElementById("meta").textContent = `updated ${age}s ago`;
 
   // --- flags ---
-  const flags = [];
-  for (const d of data.disks) {
-    const s = severity(d.use_pct, 85, 90);
-    if (s !== "ok") {
-      flags.push(flagRow(s, `<strong>${d.mount}</strong> is at ${d.use_pct}% used (${fmtBytes(d.avail_bytes)} free)`));
-    }
-  }
+  // Computed server-side (status_server.py: build_flags) so the
+  // dashboard and the email alerter always agree on what's critical.
   const sys = data.system;
-  const loadRatio = sys.load1 / Math.max(sys.ncpu, 1);
-  const loadSev = severity(loadRatio, 1.3, 2.0); // 1.3x cores -> warn, 2.0x -> critical
-  if (loadSev !== "ok") {
-    flags.push(flagRow(loadSev, `Load average ${sys.load1.toFixed(1)} is ${loadRatio.toFixed(1)}&times; the ${sys.ncpu} cores`));
-  }
   const mem = sys.memory || {};
-  if (mem.swap_total) {
-    const swapPct = 100 * mem.swap_used / mem.swap_total;
-    const swapSev = severity(swapPct, 50, 85);
-    if (swapSev !== "ok") {
-      flags.push(flagRow(swapSev, `Swap is ${swapPct.toFixed(0)}% used`));
-    }
-  }
-  document.getElementById("flags").innerHTML =
-    flags.length ? flags.join("") : flagRow("ok", "Nothing flagged right now");
+  const flags = data.flags || [];
+  document.getElementById("flags").innerHTML = flags.length
+    ? flags.map(f => flagRow(f.level, f.message)).join("")
+    : flagRow("ok", "Nothing flagged right now");
 
   // --- stat tiles ---
   const memPct = mem.total ? (100 * mem.used / mem.total) : 0;
@@ -306,7 +291,7 @@ function render(data) {
 
   // --- disks ---
   document.getElementById("disks").innerHTML = data.disks.map(d => {
-    const sev = severity(d.use_pct, 85, 90);
+    const sev = d.severity;
     return `
       <div class="meter-row">
         <div class="top">

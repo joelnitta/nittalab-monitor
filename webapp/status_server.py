@@ -15,12 +15,41 @@ from __future__ import annotations
 import argparse
 import http.server
 import json
+import os
 import shutil
 import subprocess
 import time
 from pathlib import Path
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+# Single source of truth for "is this bad" -- computed once here so
+# the dashboard's meters and its flags list can't disagree about
+# what counts as critical.
+THRESHOLDS = {
+    "disk_warn_pct": 85,
+    "disk_crit_pct": 90,
+    "load_warn_ratio": 1.3,  # x the core count
+    "load_crit_ratio": 2.0,
+    "swap_warn_pct": 50,
+    "swap_crit_pct": 85,
+}
+
+
+def severity(value: float, warn_at: float, crit_at: float) -> str:
+    if value >= crit_at:
+        return "critical"
+    if value >= warn_at:
+        return "warning"
+    return "ok"
+
+
+def human_bytes(n: float) -> str:
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if abs(n) < 1024 or unit == "TiB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} PiB"
 
 
 def run(cmd: list[str]) -> str:
@@ -49,6 +78,7 @@ def get_disks() -> list[dict]:
             size_b, used_b, avail_b = int(size), int(used), int(avail)
         except ValueError:
             continue
+        pct = int(use_pct.rstrip("%") or 0)
         disks.append(
             {
                 "filesystem": fs,
@@ -57,7 +87,10 @@ def get_disks() -> list[dict]:
                 "size_bytes": size_b,
                 "used_bytes": used_b,
                 "avail_bytes": avail_b,
-                "use_pct": int(use_pct.rstrip("%") or 0),
+                "use_pct": pct,
+                "severity": severity(
+                    pct, THRESHOLDS["disk_warn_pct"], THRESHOLDS["disk_crit_pct"]
+                ),
             }
         )
     return disks
@@ -68,13 +101,7 @@ def get_load_and_memory() -> dict:
     load1, load5, load15 = (
         (float(loadavg[i]) for i in range(3)) if len(loadavg) >= 3 else (0, 0, 0)
     )
-    ncpu = 1
-    try:
-        import os
-
-        ncpu = os.cpu_count() or 1
-    except Exception:
-        pass
+    ncpu = os.cpu_count() or 1
 
     mem = {}
     for line in run(["free", "-b"]).splitlines():
@@ -171,16 +198,65 @@ def get_gpu() -> list[dict] | None:
     return gpus
 
 
+def build_flags(disks: list[dict], system: dict) -> list[dict]:
+    """The same "is this bad" judgment the dashboard shows, in one
+    place, so anything that later reads flags (email alerts, etc.)
+    fires on exactly what the UI is showing red -- never a metric
+    the UI considers fine."""
+    flags = []
+    for d in disks:
+        if d["severity"] != "ok":
+            flags.append(
+                {
+                    "id": f"disk:{d['mount']}",
+                    "level": d["severity"],
+                    "message": (
+                        f"{d['mount']} is at {d['use_pct']}% used "
+                        f"({human_bytes(d['avail_bytes'])} free)"
+                    ),
+                }
+            )
+
+    ratio = system["load1"] / max(system["ncpu"], 1)
+    sev = severity(ratio, THRESHOLDS["load_warn_ratio"], THRESHOLDS["load_crit_ratio"])
+    if sev != "ok":
+        flags.append(
+            {
+                "id": "load",
+                "level": sev,
+                "message": (
+                    f"Load average {system['load1']:.1f} is {ratio:.1f}x "
+                    f"the {system['ncpu']} cores"
+                ),
+            }
+        )
+
+    mem = system.get("memory", {})
+    if mem.get("swap_total"):
+        swap_pct = 100 * mem["swap_used"] / mem["swap_total"]
+        sev = severity(
+            swap_pct, THRESHOLDS["swap_warn_pct"], THRESHOLDS["swap_crit_pct"]
+        )
+        if sev != "ok":
+            flags.append(
+                {"id": "swap", "level": sev, "message": f"Swap is {swap_pct:.0f}% used"}
+            )
+    return flags
+
+
 def build_status() -> dict:
+    disks = get_disks()
+    system = get_load_and_memory()
     return {
         "generated_at": time.time(),
         "hostname": run(["hostname"]).strip(),
-        "disks": get_disks(),
-        "system": get_load_and_memory(),
+        "disks": disks,
+        "system": system,
         "users": get_users(),
         "top_cpu": get_top_processes("cpu"),
         "top_mem": get_top_processes("mem"),
         "gpus": get_gpu(),
+        "flags": build_flags(disks, system),
     }
 
 
