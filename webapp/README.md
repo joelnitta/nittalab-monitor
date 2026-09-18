@@ -20,7 +20,7 @@ Then, if you're on the machine directly, open
 <http://localhost:8799/>. From your laptop, tunnel first:
 
 ```
-ssh -L 8799:localhost:8799 jnitta@rx2000
+ssh -L 8799:localhost:8799 <user>@<host>
 ```
 
 ## Access from VS Code Remote-SSH (no manual tunnel needed)
@@ -34,7 +34,7 @@ using on your laptop. Bookmark <http://localhost:18799/>.
 
 If you'd rather have it auto-forward *any* time you connect to this
 host over Remote-SSH -- even without this specific folder open --
-put the same block in your **Remote [SSH: nittalab]** settings
+put the same block in your **Remote [SSH: &lt;host&gt;]** settings
 (Command Palette -> "Preferences: Open Remote Settings (JSON)" while
 connected) instead of relying on the workspace file:
 
