@@ -296,14 +296,34 @@ def send_email(subject: str, body: str) -> None:
 # if it comes back.
 _alert_last_sent: dict[str, float] = {}
 
+# A metric like load average can hover right on a threshold and flip
+# critical/ok every single check -- without debouncing, that fires a
+# CRITICAL+RECOVERED email pair on every check while it hovers there.
+# These track how many *consecutive* checks a flag has been seen (or
+# been absent) so both directions require it to actually be sustained,
+# not just glimpsed once. The dashboard itself stays instantaneous --
+# this debounce only governs whether an email gets sent.
+_critical_streak: dict[str, int] = {}
+_ok_streak: dict[str, int] = {}
+
 
 def check_alerts() -> None:
     cooldown = int(os.environ.get("ALERT_COOLDOWN_MINUTES", "60")) * 60
+    debounce = int(os.environ.get("ALERT_DEBOUNCE_CHECKS", "3"))
     status = build_status()
     critical = {f["id"]: f for f in status["flags"] if f["level"] == "critical"}
     now = time.time()
 
+    for fid in critical:
+        _critical_streak[fid] = _critical_streak.get(fid, 0) + 1
+        _ok_streak.pop(fid, None)
+    for fid in list(_critical_streak):
+        if fid not in critical:
+            del _critical_streak[fid]
+
     for fid, flag in critical.items():
+        if _critical_streak[fid] < debounce:
+            continue  # not sustained long enough yet -- could still clear next check
         last = _alert_last_sent.get(fid)
         if last is None or (now - last) >= cooldown:
             send_email(
@@ -315,12 +335,16 @@ def check_alerts() -> None:
             _alert_last_sent[fid] = now
 
     for fid in list(_alert_last_sent):
-        if fid not in critical:
+        if fid in critical:
+            continue
+        _ok_streak[fid] = _ok_streak.get(fid, 0) + 1
+        if _ok_streak[fid] >= debounce:
             send_email(
                 f"[lab-status] RECOVERED on {status['hostname']}: {fid}",
                 f"{fid} on {status['hostname']} is no longer critical.",
             )
             del _alert_last_sent[fid]
+            del _ok_streak[fid]
 
 
 def alert_loop() -> None:

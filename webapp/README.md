@@ -88,6 +88,18 @@ same disk/load/swap thresholds the dashboard shows as red flags
 60 minutes) rather than once per check, so a still-full disk doesn't
 flood your inbox, but you also don't forget about it.
 
+A condition has to stay critical (or stay clear) for a few
+consecutive checks before it emails -- by default 3, so ~3 minutes
+sustained. Load average in particular tends to hover right at a
+threshold rather than cleanly cross it, and without this a single
+noisy metric can flip critical/ok every 60 seconds and send a
+CRITICAL+RECOVERED pair each time instead of one email for whatever
+actually happened. Tune it with `ALERT_DEBOUNCE_CHECKS` in
+`alerts.env` if 3 minutes is too twitchy or too slow for your
+tolerance. The dashboard itself isn't debounced -- it always shows
+the current instantaneous state, since that's what a live view is
+for; only the emails wait for it to be sustained.
+
 It's opt-in and off until configured:
 
 ```
